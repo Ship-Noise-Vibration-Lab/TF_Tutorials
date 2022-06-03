@@ -1,5 +1,10 @@
 # Cantilever beam test
+from xmlrpc.client import Fault
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D
 import tensorflow as tf
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras.layers import(concatenate)
 import pandas as pd
@@ -7,141 +12,116 @@ import numpy as np
 
 # 입력 데이터
 x1 = pd.read_csv('100sin_5Hz_input.csv') # 힘
-x2 = pd.read_csv('100sin_20Hz_input.csv') # 힘
-x3 = pd.read_csv('100sin_40Hz_input.csv') # 힘
+b1 = pd.read_csv('sin9Hz_bending.csv') # 1st bend frequency
 
-x1_data = x1.iloc[:,0] # 시간 input
-x2_data = x1.iloc[:,1] # 힘 input
-x3_data = x2.iloc[:,1] # 힘 input
-x4_data = x3.iloc[:,1] # 힘 input
+x1_data = x1.iloc[:,0] # time
+x2_data = x1.iloc[:,1] # force 100N
+a1_data = x1.iloc[:,3] # acceleration
+b1_data = b1.iloc[:,1] # 1st bending frequency
+amp_data = np.ones(b1_data.shape)
 
-X1 = np.array([x1_data, x2_data], dtype=np.float32)
-X2 = np.array([x1_data, x3_data], dtype=np.float32)
-X3 = np.array([x1_data, x4_data], dtype=np.float32)
+plt.plot(a1_data)
+plt.show()
 
-X1 = np.transpose(X1)
-X2 = np.transpose(X2)
-X3 = np.transpose(X3)
-XX1 = np.array([X1, X2, X3], dtype=np.float32)
-#XX1 = np.array([[x1_data, x2_data], [x1_data, x3_data], [x1_data, x4_data]], dtype=np.float32)
-print('XN shape is', X1.shape, X2.shape, X3.shape)
+X1 = np.array([x1_data, x2_data, a1_data, b1_data, amp_data], dtype=np.float32)
 
-#x1_test = np.array([X1], dtype=np.float32)
-x1_list = []
-x1_list.append(np.array(X1))
-x_test = np.asarray(x1_list)
-#print('x1_test shape is', x1_test.shape)
-print('x_test shape is', x_test.shape)
+data_num = 10
+const1 = 3
+const2 = 1
+X1 = np.zeros((data_num,len(X1),X1.shape[1]))
+
+for i in range(data_num):
+    X1[i,:,:] = np.array([x1_data, const2*x2_data*(const1*i+1), const2*a1_data*(const1*i+1), b1_data, amp_data*(const1*i+1)], dtype=np.float32)
+X1 = X1.transpose(0,2,1)
+
+for i in range(data_num):
+    name1 = "X_"
+    name2 = "Xscaler_"
+    name3 = "XScaled_"
+    globals()[name1 + str(i+1)] = X1[i,:,:]
+    globals()[name2 + str(i+1)] = StandardScaler()
+    globals()[name3 + str(i+1)] = locals()[name2 + str(i+1)].fit_transform(locals()[name1 + str(i+1)])
+    globals()[name3 + str(i+1)][:,4] = X1[i,:,4]
+    X1[i,:,:] = globals()[name3 + str(i+1)]
+
+# 역정규화
+for i in range(data_num):
+    name1 = "XRescaled_"
+    name2 = "Xscaler_"
+    globals()[name1 + str(i+1)] = globals()[name2 + str(i+1)].inverse_transform(globals()[name3 + str(i+1)])
 
 
+'''
+# 동일 데이터 확장
+data_len = len(X1)
+LL = 10
+XX = np.zeros((LL*data_len,X1.shape[1]))
+for i in range(LL):
+    XX[3*i*data_len:(3*i+1)*data_len,:] = X1
+    XX[(3*i+1)*data_len:(3*i+2)*data_len,:] = X2
+    XX[(3*i+2)*data_len:(3*i+3)*data_len,:] = X3
+
+'''
 # 출력 데이터
 y1 = pd.read_csv('100sin5Hz_output.csv') # 변위
-y2 = pd.read_csv('100sin20Hz_output.csv') # 변위
-y3 = pd.read_csv('100sin40Hz_output.csv') # 변위
 y2_data = y1.iloc[:,1] # output
-y3_data = y2.iloc[:,1] # output
-y4_data = y3.iloc[:,1] # output
-
 
 Y1 = np.array([y2_data], dtype=np.float32)
-Y2 = np.array([y3_data], dtype=np.float32)
-Y3 = np.array([y4_data], dtype=np.float32)
-Y1 = np.transpose(Y1)
-Y2 = np.transpose(Y2)
-Y3 = np.transpose(Y3)
-print('Y1 shape is', Y1.shape)
-
-YY1 = np.array([Y1, Y2, Y3], dtype=np.float32)
-#YY1 = np.array([[y2_data], [y3_data], [y4_data]], dtype=np.float32)
-#y1_data = np.array(y1_data)
-
-print(XX1.shape,YY1.shape)
-print(XX1.ndim,YY1.ndim)
 
 
+Y = np.zeros((data_num,len(Y1),Y1.shape[1]))
+for i in range(data_num):
+    Y[i,:,:] = np.array([const2*y2_data*(const1*i-1)], dtype=np.float32)
+Y1 = Y.transpose(0,2,1)
+
+# train, test 데이터 분할
+X_train, X_test, Y_train, Y_test = train_test_split(X1,Y1, test_size=0.1, shuffle=False, random_state=1) 
 
 # 모델 생성 ( 1-input 2-neurons 1-output)
-input_data_num = 2 # weight function 개수와 같은
+input_data_num = 4 
 hidden1_num = 2
 output_data_num = 1
-neurons_num1 = 5
-neurons_num2 = 5
+neurons_num1 = 8
+neurons_num2 = 16
 
-X = tf.keras.layers.Input(shape=(XX1.shape[1], XX1.shape[2]),name = 'input(dt,disp)')
+X = tf.keras.layers.Input(shape=(X_train.shape[1], X_train.shape[2]), name = 'input(case_num,dt,force,mode_fre)')
+layer1 = tf.keras.layers.Dense(neurons_num1 ,name = 'layer1') (X) # hidden layer 1
+layer2 = tf.keras.layers.Dense(neurons_num2 ,name = 'layer2') (layer1) # hidden layer 1
+layer3 = tf.keras.layers.Dense(neurons_num2 ,name = 'layer3') (layer2) # hidden layer 1
+layer4 = tf.keras.layers.Dense(neurons_num1 ,name = 'layer4') (layer3) # hidden layer 1
+Y = tf.keras.layers.Dense(output_data_num, name = 'predictions')(layer4)
 
-#concat1 = concatenate([X1, X2, X3], name = 'concat1') # 여러개 input 합치기
-layer1 = tf.keras.layers.Dense(neurons_num1, activation = 'relu',name = 'layer1') (X) # hidden layer 1
-#layer2 = tf.keras.layers.Dense(neurons_num2, activation = 'relu',name = 'layer2') (layer1) # hidden layer 1
-#layer2 = tf.keras.layers.Dense(1, name = 'layer2')(X1)
-
-Y = tf.keras.layers.Dense(output_data_num, activation = 'sigmoid',name = 'predictions')(layer1)
-#Y2 = tf.keras.layers.Dense(output_data_num, activation = 'sigmoid',name = 'output2')(layer2)
-
-#Y = tf.keras.layers.Activation(activation = 'sigmoid')(Y)
-#Y = tf.keras.layers.Activation(activation = 'softmax')(Y)
-
-model = tf.keras.models.Model(inputs = [X], outputs = [Y],name = 'model')
+model = tf.keras.models.Model(inputs = [X], outputs =[Y], name = 'model')
 print(model.summary())
-#plot_model(model, to_file='model_plot.png', show_shapes=True, show_layer_names=True)
-'''
+#plot_model(model, to_file='model_plot.png', show_shapes=True, show_layer_names=True
 
-# 사용자 루프 모델 학습 
-def binary_crossentropy(YY1, Y): # 실제값(y1_data), 예측값(Y)의 함수
-    cross_entropy = -YY1 * tf.math.log(Y) - (1 - YY1) * tf.math.log(1 - Y) # Cost function
-    loss = tf.math.reduce_mean(cross_entropy) # cost(=loss)
-    return loss
-
-optimizer = tf.keras.optimizers.Adam(learning_rate=0.01)
-epochs = 100
-for epoch_index in range(epochs):
-    with tf.GradientTape() as tape:
-        Y = model(XX1, training=True)
-        loss_value = binary_crossentropy(YY1, Y)
-    gradients = tape.gradient(loss_value, model.trainable_variables) 
-    optimizer.apply_gradients(zip(gradients, model.trainable_variables))
-    if epochs % 500 == 0:
-       print('epoch: {}/{}: loss: {:.4f}'.format(epoch_index + 1, epochs, loss_value.numpy()))
-       
-
-'''
 
 # 내장 루프 모델 학습 
-'''
-def binary_crossentropy(YY1, Y): # 실제값(y1_data), 예측값(Y)의 함수
-    cross_entropy = -YY1 * tf.math.log(Y) - (1 - YY1) * tf.math.log(1 - Y) # Cost function
-    loss = tf.math.reduce_mean(cross_entropy) # cost(=loss)
-    return loss
-'''
-#categorical_crossentropy
-model.compile(optimizer = Adam(learning_rate=0.005), loss='mse', metrics=['accuracy'])
-#history = model.fit(inputs = [XX1], outputs = [YY1], epochs=100)
-history = model.fit(XX1, YY1, epochs=3000)
+model.compile(optimizer = Adam(learning_rate=0.001), loss='mse', metrics=['accuracy'])
+#history = model.fit(X_train,Y_train, epochs=10, batch_size= 1, verbose=1, validation_split=0.2)
+history = model.fit(X1,Y1, epochs=100, batch_size= 1, verbose=1, validation_split=0.2)
+#plt.plot(history.history['loss'])
+#plt.show()
 
-
-
-'''
-#history = model.fit(x1_data, y1_data, epochs=2000, batch_size=10, verbose=200)
-_, accuracy = model.evaluate(x1_data, y1_data)
-
-print('Accuracy: %.2f' % (accuracy*100))
-
-# history plot
-def Drawing_Scalar(history_name)
-history_DF = pd.DataFrame(history_name.history)
-history_DF.plot(figsize = (12,8), linewidth=3)
-plt.grid(True)
+#%%
+# 모델 예측
+#x_test_data = x1.iloc[:,1] *900
+#X_test = np.array([x1_data, x_test_data, a1_data, b1_data], dtype=np.float32)
+#X_test = np.transpose(X_test)
+x_test = np.array([X1[3,:,:]])
+#print('x_test shape is', x_test.shape)
+y_hat_model = model.predict(x_test)
+#print("predictions will be",y_hat_model)
+#print(y_hat_model.shape)
+yy =  y_hat_model[0]
+#print(yy.shape)
+plt.plot(x1_data,yy)
 plt.show()
 
 '''
-
-# 모델 예측
-y_hat_model = model.predict(x_test)
-#label = labels[1 if y_hat_model[0][0] > 0.5 else 0]
-#y_hat_model = model.predict(x_data)
-print("predictions will be",y_hat_model)
-#print(y_hat_model,tf.math.argmax(y_hat_model,1))
-
-'''
+# Export
 df = pd.DataFrame(y_hat_model)
 df.to_csv('./y_expected_test.csv',header=False, index=False)
 '''
+
+# %%
